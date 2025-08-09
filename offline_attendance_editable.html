@@ -2,8 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Offline Attendance System - Editable</title>
-  <!-- SheetJS for .xlsx export -->
+  <title>Offline Attendance System - Editable (Password Protected)</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; max-width: 900px; margin: auto; }
@@ -12,29 +11,31 @@
     table { width: 100%; border-collapse: collapse; margin-top: 15px; }
     th, td { border: 1px solid #ccc; text-align: center; padding: 8px; }
     .btns button { margin: 0 2px; }
+    button[disabled] { opacity: 0.5; pointer-events: none; }
   </style>
 </head>
 <body>
 
-<h1>📘 Offline Attendance System (Editable)</h1>
+<h1>📘 Offline Attendance System (Editable + Password)</h1>
+<button onclick="loginAdmin()">🔑 Login as Admin</button>
 
 <h2>1️⃣ Subject & Teacher</h2>
 <input type="text" id="newSubject" placeholder="Subject name">
 <input type="text" id="newTeacher" placeholder="Teacher name">
-<button onclick="addSubject()">Add Subject</button>
+<button id="btnAddSubject" onclick="addSubject()">Add Subject</button>
 
 <select id="subjectSelect" onchange="loadStudents()">
   <option disabled selected>Select subject</option>
 </select>
-<button onclick="deleteSubject()">🗑 Delete Subject</button>
+<button id="btnDeleteSubject" onclick="deleteSubject()">🗑 Delete Subject</button>
 
 <h2>2️⃣ Student Management</h2>
 <label>Copy students from: </label>
 <select id="copyFromSelect"></select>
-<button onclick="copyStudentsFrom()">📋 Copy Students</button>
+<button id="btnCopyStudents" onclick="copyStudentsFrom()">📋 Copy Students</button>
 <br>
 <input type="text" id="studentName" placeholder="Student name">
-<button onclick="addStudent()">Add Student</button>
+<button id="btnAddStudent" onclick="addStudent()">Add Student</button>
 
 <table id="studentTable">
   <thead><tr><th>Name</th><th>Actions</th></tr></thead>
@@ -58,11 +59,39 @@
   <thead><tr><th>Name</th><th>Present</th><th>Leave</th><th>Absent</th></tr></thead>
   <tbody></tbody>
 </table>
-<button onclick="savePastAttendance()">💾 Save Changes</button>
+<button id="btnSavePastAttendance" onclick="savePastAttendance()">💾 Save Changes</button>
 
 <script>
   let subjects = JSON.parse(localStorage.getItem('subjects') || '{}');
   let selectedSubject = null;
+  let adminPassword = "";
+  let isAdmin = false;
+
+  // Prompt for password on load
+  window.onload = function() {
+    adminPassword = prompt("Set admin password for this session:");
+    disableAdminControls(true);
+    updateSubjectSelect();
+  };
+
+  function disableAdminControls(disable) {
+    document.getElementById("btnAddSubject").disabled = disable;
+    document.getElementById("btnDeleteSubject").disabled = disable;
+    document.getElementById("btnCopyStudents").disabled = disable;
+    document.getElementById("btnAddStudent").disabled = disable;
+    document.getElementById("btnSavePastAttendance").disabled = disable;
+  }
+
+  function loginAdmin() {
+    const entered = prompt("Enter admin password:");
+    if (entered === adminPassword) {
+      isAdmin = true;
+      disableAdminControls(false);
+      alert("Admin mode activated!");
+    } else {
+      alert("Wrong password!");
+    }
+  }
 
   function updateSubjectSelect() {
     const select = document.getElementById('subjectSelect');
@@ -146,6 +175,7 @@
   }
 
   function editStudent(oldName) {
+    if (!isAdmin) return alert("Admin login required!");
     const newName = prompt("Enter new student name:", oldName);
     if (newName && !subjects[selectedSubject].students.includes(newName)) {
       const idx = subjects[selectedSubject].students.indexOf(oldName);
@@ -160,6 +190,7 @@
   }
 
   function deleteStudent(name) {
+    if (!isAdmin) return alert("Admin login required!");
     subjects[selectedSubject].students = subjects[selectedSubject].students.filter(n => n !== name);
     for (let date in subjects[selectedSubject].attendance) {
       delete subjects[selectedSubject].attendance[date][name];
@@ -246,7 +277,7 @@
   }
 
   function savePastAttendance() {
-    if (!selectedSubject) return alert("Select a subject first!");
+    if (!isAdmin) return alert("Admin login required!");
     const date = document.getElementById('editDate').value;
     if (!date) return alert("Select a date!");
     if (!subjects[selectedSubject].attendance[date]) subjects[selectedSubject].attendance[date] = {};
@@ -258,17 +289,16 @@
     alert("Past attendance updated for " + date);
   }
 
+  // Export functions unchanged from before
   function exportToExcel() {
     if (!selectedSubject) return alert("Select a subject first!");
     const subject = subjects[selectedSubject];
     const dates = Object.keys(subject.attendance).sort();
     const sheetData = [];
-
     sheetData.push(["Subject: " + selectedSubject + " | Teacher: " + subject.teacher]);
     sheetData.push([]);
     const header = ["Name", ...dates];
     sheetData.push(header);
-
     subject.students.forEach(name => {
       const row = [name];
       dates.forEach(date => {
@@ -280,10 +310,8 @@
       });
       sheetData.push(row);
     });
-
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(sheetData);
-
     const colWidths = header.map((_, colIndex) => {
       let maxLen = 0;
       sheetData.forEach(row => {
@@ -293,7 +321,6 @@
       return { wch: maxLen + 2 };
     });
     ws['!cols'] = colWidths;
-
     XLSX.utils.book_append_sheet(wb, ws, selectedSubject + "_Attendance");
     XLSX.writeFile(wb, selectedSubject + "_Attendance.xlsx");
   }
@@ -302,20 +329,15 @@
     if (!selectedSubject) return alert("Select a subject first!");
     const subject = subjects[selectedSubject];
     const dates = Object.keys(subject.attendance).sort();
-
     let html = '<html><head><meta charset="UTF-8"></head><body>';
     html += '<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;">';
-
     html += '<tr><th colspan="' + (dates.length + 1) + '" style="text-align:left;">'
          + escapeHtml("Subject: " + selectedSubject + " | Teacher: " + subject.teacher)
          + '</th></tr>';
-
     html += '<tr><td colspan="' + (dates.length + 1) + '"></td></tr>';
-
     html += '<tr><th>Name</th>';
     dates.forEach(d => { html += '<th>' + escapeHtml(d) + '</th>'; });
     html += '</tr>';
-
     subject.students.forEach(name => {
       html += '<tr>';
       html += '<td>' + escapeHtml(name) + '</td>';
@@ -333,9 +355,7 @@
       });
       html += '</tr>';
     });
-
     html += '</table></body></html>';
-
     const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -359,8 +379,6 @@
   function saveData() {
     localStorage.setItem('subjects', JSON.stringify(subjects));
   }
-
-  updateSubjectSelect();
 </script>
 
 </body>
