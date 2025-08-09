@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Offline Attendance System - Editable</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; max-width: 900px; margin: auto; }
+    h1, h2 { text-align: center; }
+    input, select, button { padding: 5px; margin: 5px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    th, td { border: 1px solid #ccc; text-align: center; padding: 8px; }
+    .btns button { margin: 0 2px; }
+  </style>
+</head>
+<body>
+
+<h1>📘 Offline Attendance System (Editable)</h1>
+
+<h2>1️⃣ Subject & Teacher</h2>
+<input type="text" id="newSubject" placeholder="Subject name">
+<input type="text" id="newTeacher" placeholder="Teacher name">
+<button onclick="addSubject()">Add Subject</button>
+
+<select id="subjectSelect" onchange="loadStudents()">
+  <option disabled selected>Select subject</option>
+</select>
+<button onclick="deleteSubject()">🗑 Delete Subject</button>
+
+<h2>2️⃣ Student Management</h2>
+<input type="text" id="studentName" placeholder="Student name">
+<button onclick="addStudent()">Add Student</button>
+
+<table id="studentTable">
+  <thead><tr><th>Name</th><th>Actions</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<h2>3️⃣ Mark Attendance</h2>
+<table id="attendanceTable">
+  <thead><tr><th>Name</th><th>Present</th><th>Leave</th><th>Absent</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<button onclick="saveAttendance()">✅ Save Attendance</button>
+<button onclick="exportToExcel()">📁 Export Excel</button>
+
+<h2>4️⃣ Edit Past Attendance</h2>
+<input type="date" id="editDate">
+<button onclick="loadPastAttendance()">Load</button>
+<table id="pastAttendanceTable">
+  <thead><tr><th>Name</th><th>Present</th><th>Leave</th><th>Absent</th></tr></thead>
+  <tbody></tbody>
+</table>
+<button onclick="savePastAttendance()">💾 Save Changes</button>
+
+<script>
+  let subjects = JSON.parse(localStorage.getItem('subjects') || '{}');
+  let selectedSubject = null;
+
+  function updateSubjectSelect() {
+    const select = document.getElementById('subjectSelect');
+    select.innerHTML = '<option disabled selected>Select subject</option>';
+    for (let sub in subjects) {
+      let opt = document.createElement('option');
+      opt.value = sub;
+      opt.textContent = sub + " (" + subjects[sub].teacher + ")";
+      select.appendChild(opt);
+    }
+  }
+
+  function addSubject() {
+    const name = document.getElementById('newSubject').value.trim();
+    const teacher = document.getElementById('newTeacher').value.trim();
+    if (name && teacher && !subjects[name]) {
+      subjects[name] = { teacher, students: [], attendance: {} };
+      saveData();
+      updateSubjectSelect();
+      document.getElementById('newSubject').value = '';
+      document.getElementById('newTeacher').value = '';
+    }
+  }
+
+  function editSubject(oldName) {
+    const newName = prompt("Enter new subject name:", oldName);
+    const newTeacher = prompt("Enter new teacher name:", subjects[oldName].teacher);
+    if (newName && newTeacher) {
+      subjects[newName] = { ...subjects[oldName], teacher: newTeacher };
+      if (newName !== oldName) delete subjects[oldName];
+      saveData();
+      updateSubjectSelect();
+    }
+  }
+
+  function deleteSubject() {
+    if (!selectedSubject) return alert("Select a subject first!");
+    if (confirm("Delete subject '" + selectedSubject + "'?")) {
+      delete subjects[selectedSubject];
+      saveData();
+      updateSubjectSelect();
+      selectedSubject = null;
+      document.querySelector('#studentTable tbody').innerHTML = '';
+      document.querySelector('#attendanceTable tbody').innerHTML = '';
+    }
+  }
+
+  function addStudent() {
+    if (!selectedSubject) return alert("Select a subject first!");
+    const name = document.getElementById('studentName').value.trim();
+    if (name && !subjects[selectedSubject].students.includes(name)) {
+      subjects[selectedSubject].students.push(name);
+      saveData();
+      loadStudents();
+      document.getElementById('studentName').value = '';
+    }
+  }
+
+  function editStudent(oldName) {
+    const newName = prompt("Enter new student name:", oldName);
+    if (newName && !subjects[selectedSubject].students.includes(newName)) {
+      const idx = subjects[selectedSubject].students.indexOf(oldName);
+      subjects[selectedSubject].students[idx] = newName;
+      for (let date in subjects[selectedSubject].attendance) {
+        subjects[selectedSubject].attendance[date][newName] = subjects[selectedSubject].attendance[date][oldName];
+        delete subjects[selectedSubject].attendance[date][oldName];
+      }
+      saveData();
+      loadStudents();
+    }
+  }
+
+  function deleteStudent(name) {
+    subjects[selectedSubject].students = subjects[selectedSubject].students.filter(n => n !== name);
+    for (let date in subjects[selectedSubject].attendance) {
+      delete subjects[selectedSubject].attendance[date][name];
+    }
+    saveData();
+    loadStudents();
+  }
+
+  function loadStudents() {
+    selectedSubject = document.getElementById('subjectSelect').value;
+    const students = subjects[selectedSubject]?.students || [];
+
+    // Student table
+    const stBody = document.querySelector('#studentTable tbody');
+    stBody.innerHTML = '';
+    students.forEach(name => {
+      let row = stBody.insertRow();
+      row.insertCell(0).textContent = name;
+      let btns = document.createElement('div');
+      btns.className = 'btns';
+      let editBtn = document.createElement('button');
+      editBtn.textContent = '✏ Edit';
+      editBtn.onclick = () => editStudent(name);
+      btns.appendChild(editBtn);
+      let delBtn = document.createElement('button');
+      delBtn.textContent = '❌ Delete';
+      delBtn.onclick = () => deleteStudent(name);
+      btns.appendChild(delBtn);
+      row.insertCell(1).appendChild(btns);
+    });
+
+    // Attendance table
+    const attBody = document.querySelector('#attendanceTable tbody');
+    attBody.innerHTML = '';
+    students.forEach(name => {
+      let row = attBody.insertRow();
+      row.insertCell(0).textContent = name;
+      ["Present", "Leave", "Absent"].forEach(status => {
+        let td = document.createElement('td');
+        let btn = document.createElement('input');
+        btn.type = 'radio';
+        btn.name = 'att_' + name;
+        btn.value = status;
+        td.appendChild(btn);
+        row.appendChild(td);
+      });
+    });
+  }
+
+  function saveAttendance() {
+    if (!selectedSubject) return alert("Select a subject first!");
+    let date = new Date().toISOString().split('T')[0];
+    if (!subjects[selectedSubject].attendance[date]) {
+      subjects[selectedSubject].attendance[date] = {};
+    }
+    subjects[selectedSubject].students.forEach(name => {
+      let selected = document.querySelector('input[name="att_' + name + '"]:checked');
+      subjects[selectedSubject].attendance[date][name] = selected ? selected.value : '';
+    });
+    saveData();
+    alert("Attendance saved for " + date);
+  }
+
+  function loadPastAttendance() {
+    if (!selectedSubject) return alert("Select a subject first!");
+    const date = document.getElementById('editDate').value;
+    if (!date) return alert("Select a date!");
+    const students = subjects[selectedSubject].students;
+    const pastBody = document.querySelector('#pastAttendanceTable tbody');
+    pastBody.innerHTML = '';
+    students.forEach(name => {
+      let row = pastBody.insertRow();
+      row.insertCell(0).textContent = name;
+      ["Present", "Leave", "Absent"].forEach(status => {
+        let td = document.createElement('td');
+        let btn = document.createElement('input');
+        btn.type = 'radio';
+        btn.name = 'past_' + name;
+        btn.value = status;
+        if (subjects[selectedSubject].attendance[date]?.[name] === status) btn.checked = true;
+        td.appendChild(btn);
+        row.appendChild(td);
+      });
+    });
+  }
+
+  function savePastAttendance() {
+    if (!selectedSubject) return alert("Select a subject first!");
+    const date = document.getElementById('editDate').value;
+    if (!date) return alert("Select a date!");
+    if (!subjects[selectedSubject].attendance[date]) subjects[selectedSubject].attendance[date] = {};
+    subjects[selectedSubject].students.forEach(name => {
+      let selected = document.querySelector('input[name="past_' + name + '"]:checked');
+      subjects[selectedSubject].attendance[date][name] = selected ? selected.value : '';
+    });
+    saveData();
+    alert("Past attendance updated for " + date);
+  }
+
+  function exportToExcel() {
+    if (!selectedSubject) return alert("Select a subject first!");
+    const subject = subjects[selectedSubject];
+    const sheet = [];
+
+    // Header row with subject + teacher
+    const titleRow = ["Subject: " + selectedSubject + " | Teacher: " + subject.teacher];
+    sheet.push(titleRow);
+    sheet.push([]); // empty row
+
+    // Attendance table
+    const dates = Object.keys(subject.attendance);
+    const header = ["Name", ...dates];
+    sheet.push(header);
+
+    subject.students.forEach(name => {
+      const row = [name];
+      dates.forEach(date => {
+        row.push(subject.attendance[date]?.[name] || "");
+      });
+      sheet.push(row);
+    });
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(sheet);
+    XLSX.utils.book_append_sheet(wb, ws, selectedSubject + "_Attendance");
+    XLSX.writeFile(wb, selectedSubject + "_Attendance.xlsx");
+  }
+
+  function saveData() {
+    localStorage.setItem('subjects', JSON.stringify(subjects));
+  }
+
+  updateSubjectSelect();
+</script>
+
+</body>
+</html>
