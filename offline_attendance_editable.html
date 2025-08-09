@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>Offline Attendance System - Editable</title>
+  <!-- SheetJS for .xlsx export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; max-width: 900px; margin: auto; }
@@ -28,6 +29,10 @@
 <button onclick="deleteSubject()">🗑 Delete Subject</button>
 
 <h2>2️⃣ Student Management</h2>
+<label>Copy students from: </label>
+<select id="copyFromSelect"></select>
+<button onclick="copyStudentsFrom()">📋 Copy Students</button>
+<br>
 <input type="text" id="studentName" placeholder="Student name">
 <button onclick="addStudent()">Add Student</button>
 
@@ -43,7 +48,8 @@
 </table>
 
 <button onclick="saveAttendance()">✅ Save Attendance</button>
-<button onclick="exportToExcel()">📁 Export Excel</button>
+<button onclick="exportToExcel()">📁 Export .xlsx (no colors)</button>
+<button onclick="exportToExcelWithColorsHtml()">📁 Export .xls (colored)</button>
 
 <h2>4️⃣ Edit Past Attendance</h2>
 <input type="date" id="editDate">
@@ -67,6 +73,37 @@
       opt.textContent = sub + " (" + subjects[sub].teacher + ")";
       select.appendChild(opt);
     }
+    updateCopyFromSelect();
+  }
+
+  function updateCopyFromSelect() {
+    const select = document.getElementById('copyFromSelect');
+    select.innerHTML = '<option disabled selected>Select subject</option>';
+    for (let sub in subjects) {
+      if (sub !== selectedSubject) {
+        let opt = document.createElement('option');
+        opt.value = sub;
+        opt.textContent = sub + " (" + subjects[sub].teacher + ")";
+        select.appendChild(opt);
+      }
+    }
+  }
+
+  function copyStudentsFrom() {
+    if (!selectedSubject) return alert("Select a target subject first!");
+    const fromSubject = document.getElementById('copyFromSelect').value;
+    if (!fromSubject || !subjects[fromSubject]) return alert("Select a valid source subject!");
+
+    let copiedCount = 0;
+    subjects[fromSubject].students.forEach(name => {
+      if (!subjects[selectedSubject].students.includes(name)) {
+        subjects[selectedSubject].students.push(name);
+        copiedCount++;
+      }
+    });
+    saveData();
+    loadStudents();
+    alert(copiedCount + " students copied from " + fromSubject + " to " + selectedSubject);
   }
 
   function addSubject() {
@@ -78,17 +115,6 @@
       updateSubjectSelect();
       document.getElementById('newSubject').value = '';
       document.getElementById('newTeacher').value = '';
-    }
-  }
-
-  function editSubject(oldName) {
-    const newName = prompt("Enter new subject name:", oldName);
-    const newTeacher = prompt("Enter new teacher name:", subjects[oldName].teacher);
-    if (newName && newTeacher) {
-      subjects[newName] = { ...subjects[oldName], teacher: newTeacher };
-      if (newName !== oldName) delete subjects[oldName];
-      saveData();
-      updateSubjectSelect();
     }
   }
 
@@ -107,10 +133,14 @@
   function addStudent() {
     if (!selectedSubject) return alert("Select a subject first!");
     const name = document.getElementById('studentName').value.trim();
-    if (name && !subjects[selectedSubject].students.includes(name)) {
-      subjects[selectedSubject].students.push(name);
-      saveData();
-      loadStudents();
+    if (name) {
+      if (!subjects[selectedSubject].students.includes(name)) {
+        subjects[selectedSubject].students.push(name);
+        saveData();
+        loadStudents();
+      } else {
+        alert("This student name already exists in this subject!");
+      }
       document.getElementById('studentName').value = '';
     }
   }
@@ -140,9 +170,9 @@
 
   function loadStudents() {
     selectedSubject = document.getElementById('subjectSelect').value;
+    updateCopyFromSelect();
     const students = subjects[selectedSubject]?.students || [];
 
-    // Student table
     const stBody = document.querySelector('#studentTable tbody');
     stBody.innerHTML = '';
     students.forEach(name => {
@@ -161,7 +191,6 @@
       row.insertCell(1).appendChild(btns);
     });
 
-    // Attendance table
     const attBody = document.querySelector('#attendanceTable tbody');
     attBody.innerHTML = '';
     students.forEach(name => {
@@ -232,30 +261,99 @@
   function exportToExcel() {
     if (!selectedSubject) return alert("Select a subject first!");
     const subject = subjects[selectedSubject];
-    const sheet = [];
+    const dates = Object.keys(subject.attendance).sort();
+    const sheetData = [];
 
-    // Header row with subject + teacher
-    const titleRow = ["Subject: " + selectedSubject + " | Teacher: " + subject.teacher];
-    sheet.push(titleRow);
-    sheet.push([]); // empty row
-
-    // Attendance table
-    const dates = Object.keys(subject.attendance);
+    sheetData.push(["Subject: " + selectedSubject + " | Teacher: " + subject.teacher]);
+    sheetData.push([]);
     const header = ["Name", ...dates];
-    sheet.push(header);
+    sheetData.push(header);
 
     subject.students.forEach(name => {
       const row = [name];
       dates.forEach(date => {
-        row.push(subject.attendance[date]?.[name] || "");
+        let val = subject.attendance[date]?.[name] || "";
+        if (val === "Present") val = "P";
+        else if (val === "Leave") val = "L";
+        else if (val === "Absent") val = "A";
+        row.push(val);
       });
-      sheet.push(row);
+      sheetData.push(row);
     });
 
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(sheet);
+    const ws = XLSX.utils.aoa_to_sheet(sheetData);
+
+    const colWidths = header.map((_, colIndex) => {
+      let maxLen = 0;
+      sheetData.forEach(row => {
+        const cell = row[colIndex] ? row[colIndex].toString() : "";
+        if (cell.length > maxLen) maxLen = cell.length;
+      });
+      return { wch: maxLen + 2 };
+    });
+    ws['!cols'] = colWidths;
+
     XLSX.utils.book_append_sheet(wb, ws, selectedSubject + "_Attendance");
     XLSX.writeFile(wb, selectedSubject + "_Attendance.xlsx");
+  }
+
+  function exportToExcelWithColorsHtml() {
+    if (!selectedSubject) return alert("Select a subject first!");
+    const subject = subjects[selectedSubject];
+    const dates = Object.keys(subject.attendance).sort();
+
+    let html = '<html><head><meta charset="UTF-8"></head><body>';
+    html += '<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;">';
+
+    html += '<tr><th colspan="' + (dates.length + 1) + '" style="text-align:left;">'
+         + escapeHtml("Subject: " + selectedSubject + " | Teacher: " + subject.teacher)
+         + '</th></tr>';
+
+    html += '<tr><td colspan="' + (dates.length + 1) + '"></td></tr>';
+
+    html += '<tr><th>Name</th>';
+    dates.forEach(d => { html += '<th>' + escapeHtml(d) + '</th>'; });
+    html += '</tr>';
+
+    subject.students.forEach(name => {
+      html += '<tr>';
+      html += '<td>' + escapeHtml(name) + '</td>';
+      dates.forEach(date => {
+        const raw = subject.attendance[date]?.[name] || "";
+        let code = "", bg = "", color = "";
+        if (raw === "Present") { code = "P"; bg = "#C6EFCE"; color = "#006100"; }
+        else if (raw === "Leave") { code = "L"; bg = "#FFEB9C"; color = "#9C6500"; }
+        else if (raw === "Absent") { code = "A"; bg = "#FFC7CE"; color = "#9C0006"; }
+        if (bg) {
+          html += '<td style="background-color:' + bg + '; color:' + color + '; text-align:center;">' + escapeHtml(code) + '</td>';
+        } else {
+          html += '<td style="text-align:center;">' + escapeHtml(code) + '</td>';
+        }
+      });
+      html += '</tr>';
+    });
+
+    html += '</table></body></html>';
+
+    const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = selectedSubject + '_Attendance.xls';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function escapeHtml(text) {
+    if (text === null || text === undefined) return "";
+    return text.toString()
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   }
 
   function saveData() {
